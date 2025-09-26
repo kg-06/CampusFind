@@ -5,7 +5,7 @@ const Request = require('../models/Request');
 const Match = require('../models/Match');
 const User = require('../models/User');
 const { computeScore } = require('../services/matcher');
-const { sendMail } = require('../services/email'); // update your email service to export sendMail
+const { sendMail } = require('../services/email'); 
 
 router.post('/', auth, async (req, res) => {
   const userId = req.user.id;

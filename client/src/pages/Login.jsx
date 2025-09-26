@@ -83,7 +83,7 @@ export default function Login({ onLogin }) {
         <>
           <div id="g-btn" />
           <p className="text-sm text-gray-500 mt-4">
-            Use your <b>@chitkara.edu.in</b> account. The server will enforce the domain.
+            Use your <b>@chitkara.edu.in</b> account.
           </p>
         </>
       )}

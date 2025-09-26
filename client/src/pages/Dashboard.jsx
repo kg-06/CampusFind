@@ -111,7 +111,11 @@ export default function Dashboard({ onLogout }) {
 
       </div>
 
-      {selectedMatchId && <div className="mt-6"><Chat matchId={selectedMatchId} /></div>}
+      {selectedMatchId && (
+       <div className="mt-6">
+          <Chat matchId={selectedMatchId} onClose={() => setSelectedMatchId(null)} />
+        </div>
+      )}
     </div>
   )
 }

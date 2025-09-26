@@ -6,7 +6,7 @@ const matchSchema = new Schema({
   foundRequestId: { type: Schema.Types.ObjectId, ref: 'Request', required: true },
   score: Number,
   status: { type: String, enum: ['pending','chatVerified','closed'], default: 'pending' },
-  chatId: { type: Schema.Types.ObjectId }, // optional
+  chatId: { type: Schema.Types.ObjectId },
   createdAt: { type: Date, default: Date.now }
 });
 

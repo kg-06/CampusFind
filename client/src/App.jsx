@@ -1,26 +1,41 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import NavBar from './components/NavBar'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
-import { getToken } from './services/auth'
+import { getToken, clearToken } from './services/auth'
 import './index.css'
 
-
 export default function App() {
-const [user, setUser] = useState(null)
-const token = getToken()
+  const [authed, setAuthed] = useState(!!getToken())
 
+  
+  useEffect(() => {
+    const id = setInterval(() => {
+      const t = !!getToken()
+      setAuthed(prev => (prev === t ? prev : t))
+    }, 500)
+    return () => clearInterval(id)
+  }, [])
 
-return (
-<div className="min-h-screen flex flex-col">
-<NavBar onLogout={() => setUser(null)} />
-<main className="flex-1">
-{!token ? (
-<Login onLogin={(u)=>setUser(u)} />
-) : (
-<Dashboard onLogout={() => setUser(null)} />
-)}
-</main>
-</div>
-)
+  const handleLogout = () => {
+    clearToken()
+    setAuthed(false) 
+  }
+
+  const handleLogin = () => {
+    setAuthed(true) 
+  }
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      <NavBar onLogout={handleLogout} />
+      <main className="flex-1">
+        {!authed ? (
+          <Login onLogin={handleLogin} />
+        ) : (
+          <Dashboard onLogout={handleLogout} />
+        )}
+      </main>
+    </div>
+  )
 }
