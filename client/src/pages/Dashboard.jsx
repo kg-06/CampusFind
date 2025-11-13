@@ -2,15 +2,17 @@ import React, { useState, useEffect } from 'react'
 import CreateRequest from './CreateRequest'
 import MatchesModal from './MatchesModal'
 import Chat from './Chat'
+import Resolved from './Resolved'
 import { getToken } from '../services/auth'
-import { getJSON } from '../services/api'
+import { getJSON, postJSON } from '../services/api'
 
 export default function Dashboard({ onLogout }) {
   const [showCreateKind, setShowCreateKind] = useState(null)
-  const [matches, setMatches] = useState([])
   const [selectedMatchId, setSelectedMatchId] = useState(null)
   const [requests, setRequests] = useState([])
   const [loading, setLoading] = useState(false)
+  const [showResolvedPage, setShowResolvedPage] = useState(false)
+  const [matchMeta, setMatchMeta] = useState({}) // map matchId -> match object
   const token = getToken()
 
   const fetchMyRequests = async () => {
@@ -20,8 +22,21 @@ export default function Dashboard({ onLogout }) {
       const res = await getJSON('/api/requests/me', token)
       if (res && res.requests) {
         setRequests(res.requests)
+        // once requests fetched, load match metadata for any matches we haven't loaded
+        const allMatchIds = []
+        for (const r of res.requests) {
+          if (r._matches && r._matches.length) {
+            for (const m of r._matches) {
+              if (m.matchId) allMatchIds.push(m.matchId)
+            }
+          }
+        }
+        // Deduplicate
+        const unique = [...new Set(allMatchIds)]
+        if (unique.length) await loadMatchMeta(unique)
       } else {
         setRequests([])
+        setMatchMeta({})
       }
     } catch (err) {
       console.error('Failed to fetch requests', err)
@@ -30,17 +45,81 @@ export default function Dashboard({ onLogout }) {
     }
   }
 
+  // loads metadata for given match ids and stores into matchMeta
+  const loadMatchMeta = async (matchIds = []) => {
+    if (!matchIds || matchIds.length === 0) return
+    const newMeta = { ...matchMeta }
+    try {
+      await Promise.all(matchIds.map(async (id) => {
+        try {
+          const m = await getJSON(`/api/matches/${id}`, token)
+          // server returns match object; normalize minimal fields
+          if (m && m._id) newMeta[id] = m
+        } catch (e) {
+          // ignore individual fetch errors
+          console.warn('Failed to fetch match meta for', id, e)
+        }
+      }))
+      setMatchMeta(newMeta)
+    } catch (e) {
+      console.error('loadMatchMeta failed', e)
+    }
+  }
+
   useEffect(() => {
     fetchMyRequests()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) 
 
   const handleCreated = async (createdRequest) => {
     await fetchMyRequests()
   }
 
+  // confirm match: user clicks item received / item returned depending on role
+  const confirmMatch = async (matchId) => {
+    if (!matchId) return
+    if (!token) { alert('Not authenticated'); return }
+    try {
+      await postJSON(`/api/matches/${matchId}/confirm`, {}, token)
+      // refresh match meta for just this match and refetch requests to update lists
+      await loadMatchMeta([matchId])
+      await fetchMyRequests()
+      alert('Confirmed. If both parties confirmed, match will be closed.')
+    } catch (err) {
+      console.error('confirm match failed', err)
+      alert('Failed to confirm match: ' + (err.message || err))
+    }
+  }
+
+  // helper to compute UI flags for a given request r and its match entry mEntry
+  const computeUIFlags = (r, mEntry) => {
+    const meta = matchMeta[mEntry.matchId]
+    if (!meta) return { closed: false, pending: false, confirmedByMe: false }
+    const closed = meta.status === 'closed' || meta.status === 'verified' // treat verified/closed as closed UI-wise
+    // determine whether current user is the lost owner for this request 'r'
+    const iAmLostSide = (r.kind === 'lost')
+    const confirmedByMe = iAmLostSide ? !!meta.lostConfirmed : !!meta.foundConfirmed
+    const otherConfirmed = iAmLostSide ? !!meta.foundConfirmed : !!meta.lostConfirmed
+    const pending = !closed && (meta.lostConfirmed || meta.foundConfirmed) && !(meta.lostConfirmed && meta.foundConfirmed)
+    return { closed, pending, confirmedByMe, otherConfirmed }
+  }
+
   return (
     <div className="p-6">
       <div className="max-w-4xl mx-auto">
+        <div className="flex justify-between items-center mb-4">
+          <div className="text-2xl font-semibold">Dashboard</div>
+          <div className="flex gap-2">
+            <button onClick={() => setShowResolvedPage(v=>!v)} className="px-3 py-1 border rounded text-sm">
+              {showResolvedPage ? 'Back to My Requests' : 'View Successful Matches'}
+            </button>
+          </div>
+        </div>
+
+        {showResolvedPage ? (
+          <Resolved />
+        ) : (
+        <>
         <div className="grid grid-cols-2 gap-4 mb-6">
           <div className="p-6 bg-white rounded shadow text-center">
             <h3 className="text-xl font-semibold mb-2">I Lost Something</h3>
@@ -88,18 +167,31 @@ export default function Dashboard({ onLogout }) {
                       <div className="text-sm text-gray-500">No matches yet.</div>
                     ) : (
                       <div className="space-y-2">
-                        {r._matches.map((m, idx) => (
-                          <div key={idx} className="p-2 border rounded flex justify-between items-center">
+                        {r._matches.map((m, idx) => {
+                          const flags = computeUIFlags(r, m)
+                          return (
+                          <div key={idx} className={`p-2 border rounded flex justify-between items-center ${flags.closed ? 'opacity-80' : ''}`}>
                             <div>
                               <div className="text-sm font-semibold">{m.matchedRequest ? m.matchedRequest.title : 'No title'}</div>
                               <div className="text-xs text-gray-600">Category: {m.matchedRequest?.category || '—'} • Loc: {m.matchedRequest?.locationText || '—'}</div>
                               <div className="text-xs text-gray-500">Score: {m.score ? m.score.toFixed(2) : '—'}</div>
+                              {flags.pending && <div className="inline-block mt-1 px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded">Pending confirmation</div>}
+                              {flags.closed && <div className="inline-block mt-1 px-2 py-0.5 bg-gray-800 text-white text-xs rounded ml-2">CLOSED</div>}
                             </div>
-                            <div>
+                            <div className="flex gap-2">
                               <button className="px-3 py-1 bg-blue-600 text-white rounded" onClick={() => setSelectedMatchId(m.matchId)}>Open Chat</button>
+                              <button
+                                className="px-3 py-1 bg-gray-700 text-white rounded"
+                                onClick={() => confirmMatch(m.matchId)}
+                                disabled={!!flags.closed || !!flags.confirmedByMe}
+                                title={flags.closed ? 'This match is closed' : (flags.confirmedByMe ? 'You already confirmed' : 'Confirm received/returned')}
+                                style={{ opacity: (flags.closed || flags.confirmedByMe) ? 0.5 : 1 }}
+                              >
+                                Confirm
+                              </button>
                             </div>
                           </div>
-                        ))}
+                        )})}
                       </div>
                     )}
                   </div>
@@ -108,7 +200,8 @@ export default function Dashboard({ onLogout }) {
             </div>
           )}
         </div>
-
+        </>
+        )}
       </div>
 
       {selectedMatchId && (
