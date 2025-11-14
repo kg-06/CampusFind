@@ -9,7 +9,7 @@ function socketHandler(io) {
     if (!token) return next(new Error('Auth error'));
     try {
       const payload = jwt.verify(token, process.env.JWT_SECRET);
-      socket.user = payload; 
+      socket.user = payload;
       next();
     } catch (err) {
       next(new Error('Auth error'));
@@ -29,6 +29,12 @@ function socketHandler(io) {
           return;
         }
 
+        // only allow joining active/open matches
+        if (m.status !== 'open') {
+          socket.emit('error', { message: 'This match is not active (closed/cancelled)' });
+          return;
+        }
+
         const room = `match:${matchId}`;
         socket.join(room);
         console.log(`socket ${socket.user?.email || socket.id} joined room ${room}`);
@@ -43,6 +49,13 @@ function socketHandler(io) {
       try {
         if (!matchId || !text) {
           socket.emit('error', { message: 'invalid message payload' });
+          return;
+        }
+
+        // ensure match is still open before saving message
+        const m = await Match.findById(matchId).select('status').lean();
+        if (!m || m.status !== 'open') {
+          socket.emit('error', { message: 'Cannot send message: match is not active' });
           return;
         }
 

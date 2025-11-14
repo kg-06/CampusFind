@@ -3,6 +3,7 @@ const Schema = mongoose.Schema;
 
 const matchSub = new Schema({
   matchedRequestId: { type: Schema.Types.ObjectId, ref: 'Request' },
+  matchId: { type: Schema.Types.ObjectId, ref: 'Match' }, // new field
   score: Number,
   createdAt: { type: Date, default: Date.now }
 }, { _id: false });

@@ -10,6 +10,7 @@ const authRoutes = require('./routes/auth');
 const requestsRoutes = require('./routes/requests');
 const matchesRoutes = require('./routes/matches');
 const { socketHandler } = require('./sockets/socketHandler');
+const socketEmitter = require('./services/socketEmitter');
 
 const app = express();
 const server = http.createServer(app);
@@ -17,17 +18,18 @@ const { Server } = require('socket.io');
 const io = new Server(server, {
   cors: { origin: process.env.FRONTEND_URL || '*' }
 });
-app.set('io', io);
+
+// set up socket emitter for other modules to use
+socketEmitter.setIo(io);
 
 app.use(cors({ origin: process.env.FRONTEND_URL, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 
-
+// routes
 app.use('/auth', authRoutes);
 app.use('/api/requests', requestsRoutes);
 app.use('/api/matches', matchesRoutes);
-
 
 app.get('/', (req, res) => res.send('Lost & Found API'));
 
@@ -42,9 +44,9 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
     server.listen(PORT, () => {
       console.log(`Server listening on ${PORT}`);
     });
+    // start socket handler after server is listening
+    socketHandler(io);
   })
   .catch(err => {
     console.error('MongoDB connection error:', err);
   });
-
-socketHandler(io);

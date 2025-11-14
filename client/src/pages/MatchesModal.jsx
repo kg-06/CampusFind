@@ -30,7 +30,7 @@ export default function MatchesModal({ matches = [], onClose, onOpenChat, onRefe
       await postJSON(`/api/matches/${matchId}/confirm`, {}, token)
       alert('Confirmed. If both parties confirmed, match will be closed.')
       if (typeof onRefetch === 'function') onRefetch()
-      // refresh this modal's meta
+      // refresh this match meta
       const updated = await getJSON(`/api/matches/${matchId}`, token)
       setMeta(prev => ({ ...prev, [matchId]: updated }))
     } catch (err) {
@@ -52,18 +52,14 @@ export default function MatchesModal({ matches = [], onClose, onOpenChat, onRefe
           <div className="space-y-3">
             {matches.map(m => {
               const mm = meta[m.matchId] || {}
-              const closed = mm.status === 'closed' || mm.status === 'verified'
-              // We don't know which side we are in modal context; keep confirm enabled and let server decide authorization
-              const confirmedByMe = (mm.lostConfirmed && mm.lostRequestId && mm.lostRequestId.owner === mm.currentUserId) || false
-              // Simpler: disable if closed or if current user already set the corresponding flag; server enforces anyway
+              const closed = mm.status === 'closed'
+              const pending = !closed && (mm.lostConfirmed || mm.foundConfirmed) && !(mm.lostConfirmed && mm.foundConfirmed)
               return (
                 <div key={m.matchId} className="p-3 border rounded flex justify-between items-center">
                   <div>
                     <div className="font-semibold">Score: {(m.score||0).toFixed(2)}</div>
                     <div className="text-sm text-gray-600">Matched Request ID: {m.matchedRequestId}</div>
-                    {mm && (mm.lostConfirmed || mm.foundConfirmed) && !closed && (
-                      <div className="inline-block mt-1 px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded">Pending confirmation</div>
-                    )}
+                    {pending && <div className="inline-block mt-1 px-2 py-0.5 bg-yellow-100 text-yellow-800 text-xs rounded">Pending confirmation</div>}
                     {closed && <div className="inline-block mt-1 px-2 py-0.5 bg-gray-800 text-white text-xs rounded ml-2">CLOSED</div>}
                   </div>
                   <div className="flex gap-2">

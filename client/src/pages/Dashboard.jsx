@@ -5,6 +5,7 @@ import Chat from './Chat'
 import Resolved from './Resolved'
 import { getToken } from '../services/auth'
 import { getJSON, postJSON } from '../services/api'
+import { getSocket, connectSocket } from '../services/socket'
 
 export default function Dashboard({ onLogout }) {
   const [showCreateKind, setShowCreateKind] = useState(null)
@@ -31,7 +32,6 @@ export default function Dashboard({ onLogout }) {
             }
           }
         }
-        // Deduplicate
         const unique = [...new Set(allMatchIds)]
         if (unique.length) await loadMatchMeta(unique)
       } else {
@@ -53,10 +53,8 @@ export default function Dashboard({ onLogout }) {
       await Promise.all(matchIds.map(async (id) => {
         try {
           const m = await getJSON(`/api/matches/${id}`, token)
-          // server returns match object; normalize minimal fields
           if (m && m._id) newMeta[id] = m
         } catch (e) {
-          // ignore individual fetch errors
           console.warn('Failed to fetch match meta for', id, e)
         }
       }))
@@ -71,17 +69,52 @@ export default function Dashboard({ onLogout }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []) 
 
+  // Socket listeners: refresh lists when matches change
+  useEffect(() => {
+    const socket = connectSocket()
+    if (!socket) return
+    function onMatchCancelled(payload) {
+      console.log('socket: match:cancelled', payload)
+      // quick strategy: refetch all my requests so UI is in sync
+      fetchMyRequests()
+    }
+    function onMatchUpdated(payload) {
+      console.log('socket: match:updated', payload)
+      // refresh that single match meta and requests
+      if (payload && payload.matchId) {
+        loadMatchMeta([payload.matchId])
+      }
+      fetchMyRequests()
+    }
+    function onMatchClosed(payload) {
+      console.log('socket: match:closed', payload)
+      fetchMyRequests()
+    }
+
+    socket.on && socket.on('match:cancelled', onMatchCancelled)
+    socket.on && socket.on('match:updated', onMatchUpdated)
+    socket.on && socket.on('match:closed', onMatchClosed)
+
+    // cleanup
+    return () => {
+      try {
+        socket.off && socket.off('match:cancelled', onMatchCancelled)
+        socket.off && socket.off('match:updated', onMatchUpdated)
+        socket.off && socket.off('match:closed', onMatchClosed)
+      } catch (e) {}
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const handleCreated = async (createdRequest) => {
     await fetchMyRequests()
   }
 
-  // confirm match: user clicks item received / item returned depending on role
   const confirmMatch = async (matchId) => {
     if (!matchId) return
     if (!token) { alert('Not authenticated'); return }
     try {
       await postJSON(`/api/matches/${matchId}/confirm`, {}, token)
-      // refresh match meta for just this match and refetch requests to update lists
       await loadMatchMeta([matchId])
       await fetchMyRequests()
       alert('Confirmed. If both parties confirmed, match will be closed.')
@@ -91,12 +124,10 @@ export default function Dashboard({ onLogout }) {
     }
   }
 
-  // helper to compute UI flags for a given request r and its match entry mEntry
   const computeUIFlags = (r, mEntry) => {
     const meta = matchMeta[mEntry.matchId]
     if (!meta) return { closed: false, pending: false, confirmedByMe: false }
-    const closed = meta.status === 'closed' || meta.status === 'verified' // treat verified/closed as closed UI-wise
-    // determine whether current user is the lost owner for this request 'r'
+    const closed = meta.status === 'closed' || meta.status === 'verified' || meta.status === 'cancelled'
     const iAmLostSide = (r.kind === 'lost')
     const confirmedByMe = iAmLostSide ? !!meta.lostConfirmed : !!meta.foundConfirmed
     const otherConfirmed = iAmLostSide ? !!meta.foundConfirmed : !!meta.lostConfirmed
@@ -170,7 +201,7 @@ export default function Dashboard({ onLogout }) {
                         {r._matches.map((m, idx) => {
                           const flags = computeUIFlags(r, m)
                           return (
-                          <div key={idx} className={`p-2 border rounded flex justify-between items-center ${flags.closed ? 'opacity-80' : ''}`}>
+                          <div key={idx} className={`p-2 border rounded flex justify-between items-center ${flags.closed ? 'opacity-70' : ''}`}>
                             <div>
                               <div className="text-sm font-semibold">{m.matchedRequest ? m.matchedRequest.title : 'No title'}</div>
                               <div className="text-xs text-gray-600">Category: {m.matchedRequest?.category || '—'} • Loc: {m.matchedRequest?.locationText || '—'}</div>
