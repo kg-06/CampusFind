@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef } from 'react'
 import { connectSocket, getSocket } from '../services/socket'
 import { getToken } from '../services/auth'
@@ -26,9 +25,7 @@ export default function Chat({ matchId, onClose }) {
       return
     }
 
-    
     const socket = (typeof socketWrapper.on === 'function') ? socketWrapper : (socketWrapper && socketWrapper.socket && typeof socketWrapper.socket.on === 'function' ? socketWrapper.socket : socketWrapper)
-
     if (!socket) {
       console.error('Chat: invalid socket object', socketWrapper)
       setError('Socket connection error (invalid socket object).')
@@ -38,10 +35,33 @@ export default function Chat({ matchId, onClose }) {
 
     function handleConnect() { console.log('socket connected', socket.id) }
     function handleDisconnect(reason) { console.log('socket disconnected', reason) }
-    function handleConnectError(err) { console.log('socket connect_error', err && err.message) }
+    function handleConnectError(err) { console.log('socket connect_error', err && err.message); }
     function handleMessageNew(payload) {
       const msg = payload && payload.msg ? payload.msg : payload
       setMessages(prev => [...prev, msg])
+    }
+
+    function handleMatchCancelled(payload) {
+      if (!payload) return
+      if (payload.matchId === matchId || payload.lostRequestId === matchId || payload.foundRequestId === matchId) {
+        // match cancelled/affected -> notify user and close
+        setError('This match was cancelled or closed. Chat is no longer available.')
+        setTimeout(() => {
+          if (typeof onClose === 'function') onClose()
+          else setVisible(false)
+        }, 1200)
+      }
+    }
+
+    function handleMatchUpdated(payload) {
+      if (!payload) return
+      if (payload.matchId === matchId && payload.status && payload.status !== 'open') {
+        setError('This match status changed — chat will close.')
+        setTimeout(() => {
+          if (typeof onClose === 'function') onClose()
+          else setVisible(false)
+        }, 1200)
+      }
     }
 
     if (typeof socket.on === 'function') {
@@ -49,28 +69,23 @@ export default function Chat({ matchId, onClose }) {
       socket.on('disconnect', handleDisconnect)
       socket.on('connect_error', handleConnectError)
       socket.on('message:new', handleMessageNew)
+      socket.on('match:cancelled', handleMatchCancelled)
+      socket.on('match:updated', handleMatchUpdated)
+      socket.on('match:closed', handleMatchCancelled)
+      socket.on('error', (d) => {
+        // server side socket errors sometimes arrive here
+        console.warn('socket error event', d)
+        const msg = (d && d.message) ? d.message : (typeof d === 'string' ? d : null)
+        if (msg) setError(msg)
+      })
     } else if (typeof socket.addEventListener === 'function') {
-      socket.addEventListener('connect', handleConnect)
-      socket.addEventListener('disconnect', handleDisconnect)
-      socket.addEventListener('connect_error', handleConnectError)
       socket.addEventListener('message:new', handleMessageNew)
-    } else if (typeof socket.addListener === 'function') {
-      socket.addListener('connect', handleConnect)
-      socket.addListener('disconnect', handleDisconnect)
-      socket.addListener('connect_error', handleConnectError)
-      socket.addListener('message:new', handleMessageNew)
-    } else {
-      console.warn('Chat: socket does not support on/addEventListener/addListener', socket)
-      setError('Socket API unsupported in this environment.')
-      setLoading(false)
-      return
+      // addEventListener for custom events might not be available cross libs; keep minimum
     }
-
 
     try {
       if (typeof socket.emit === 'function') socket.emit('join', { matchId })
       else if (typeof socket.dispatchEvent === 'function') socket.dispatchEvent(new CustomEvent('join', { detail: { matchId } }))
-      else console.warn('Chat: cannot emit join on socket')
     } catch (e) {
       console.error('emit join failed', e)
     }
@@ -95,19 +110,13 @@ export default function Chat({ matchId, onClose }) {
           socket.off('connect', handleConnect)
           socket.off('disconnect', handleDisconnect)
           socket.off('connect_error', handleConnectError)
+          socket.off('match:cancelled', handleMatchCancelled)
+          socket.off('match:updated', handleMatchUpdated)
+          socket.off('match:closed', handleMatchCancelled)
         } else if (typeof socket.removeEventListener === 'function') {
           socket.removeEventListener('message:new', handleMessageNew)
-          socket.removeEventListener('connect', handleConnect)
-          socket.removeEventListener('disconnect', handleDisconnect)
-          socket.removeEventListener('connect_error', handleConnectError)
-        } else if (typeof socket.removeListener === 'function') {
-          socket.removeListener('message:new', handleMessageNew)
-          socket.removeListener('connect', handleConnect)
-          socket.removeListener('disconnect', handleDisconnect)
-          socket.removeListener('connect_error', handleConnectError)
         }
-      } catch (e) {
-      }
+      } catch (e) {}
     }
   }, [matchId, token])
 
